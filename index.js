@@ -1,32 +1,40 @@
 const http = require('http');
 const { Client, GatewayIntentBits, Events } = require('discord.js');
-const { Ollama } = require('ollama');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const OLLAMA_HOST   = 'http://127.0.0.1:11434';
-const MODEL         = 'qwen2.5:3b';
-const PREFIX        = '!ai ';
-const MAX_HISTORY   = 6;       // messages per channel (user+assistant pairs)
-const MAX_CHARS     = 1990;    // Discord message limit safety margin
-const KEEP_ALIVE    = '30m';
-const NUM_CTX       = 2048;
-const NUM_PREDICT   = 450;
+const DISCORD_TOKEN  = process.env.DISCORD_TOKEN;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const MODEL_NAME     = 'gemini-2.0-flash';
+const PREFIX         = '!ai ';
+const MAX_HISTORY    = 10;    // pesan per channel (5 user + 5 assistant)
+const MAX_CHARS      = 1990;  // batas aman pesan Discord
+const PORT           = process.env.PORT || 3000;
 
-// ─── HTTP Healthcheck Server (required by HF Spaces) ─────────────────────────
+// ─── Validasi env vars ────────────────────────────────────────────────────────
+if (!DISCORD_TOKEN)  { console.error('[error] DISCORD_TOKEN tidak diset!'); process.exit(1); }
+if (!GEMINI_API_KEY) { console.error('[error] GEMINI_API_KEY tidak diset!'); process.exit(1); }
+
+// ─── HTTP Healthcheck (wajib untuk Render.com agar tidak sleep) ───────────────
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('OK - Discord Ollama Bot is running\n');
+  res.end('OK - Discord Gemini Bot is running\n');
 });
-server.listen(7860, '0.0.0.0', () => {
-  console.log('[healthcheck] HTTP server listening on 0.0.0.0:7860');
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`[healthcheck] HTTP server listening on port ${PORT}`);
 });
 
-// ─── Ollama Client ────────────────────────────────────────────────────────────
-const ollama = new Ollama({ host: OLLAMA_HOST });
+// ─── Gemini Client ────────────────────────────────────────────────────────────
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-// ─── Chat History Store ───────────────────────────────────────────────────────
-// Map<channelId, Array<{role, content}>>
+const SYSTEM_INSTRUCTION =
+  'Kamu adalah asisten AI yang membantu, ramah, dan cerdas. ' +
+  'Jawab dalam bahasa yang sama dengan pengguna (Indonesia atau Inggris). ' +
+  'Jawab secara ringkas, jelas, dan akurat. ' +
+  'Jika tidak tahu jawabannya, katakan dengan jujur.';
+
+// ─── Chat History Store (per channel) ────────────────────────────────────────
+// Map<channelId, Array<{role: 'user'|'model', parts: [{text}]}>
 const chatHistory = new Map();
 
 function getHistory(channelId) {
@@ -35,12 +43,11 @@ function getHistory(channelId) {
 }
 
 function trimHistory(history) {
-  // Keep at most MAX_HISTORY messages (each user msg + assistant reply = 2)
   while (history.length > MAX_HISTORY) history.shift();
 }
 
-// ─── Message Queue (prevent CPU overload on burst requests) ───────────────────
-const queue = new Map(); // Map<channelId, Promise>
+// ─── Pesan Queue per channel (cegah overload) ─────────────────────────────────
+const queue = new Map();
 
 function enqueue(channelId, task) {
   const prev = queue.get(channelId) || Promise.resolve();
@@ -59,12 +66,12 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, (c) => {
-  console.log(`[discord] Logged in as ${c.user.tag}`);
-  console.log(`[discord] Model: ${MODEL} | Host: ${OLLAMA_HOST}`);
+  console.log(`[discord] Login berhasil sebagai: ${c.user.tag}`);
+  console.log(`[discord] Model: ${MODEL_NAME}`);
+  console.log(`[discord] Bot siap! Prefix: "${PREFIX}" atau mention bot`);
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  // Ignore bots
   if (message.author.bot) return;
 
   const isMentioned = message.mentions.has(client.user);
@@ -72,74 +79,71 @@ client.on(Events.MessageCreate, async (message) => {
 
   if (!isMentioned && !hasPrefix) return;
 
-  // Extract user prompt
+  // Ekstrak prompt user
   let userPrompt = message.content;
-  if (hasPrefix) userPrompt = userPrompt.slice(PREFIX.length).trim();
+  if (hasPrefix)   userPrompt = userPrompt.slice(PREFIX.length).trim();
   if (isMentioned) userPrompt = userPrompt.replace(`<@${client.user.id}>`, '').trim();
 
   if (!userPrompt) {
-    await message.reply('Halo! Ketik pertanyaanmu setelah mention atau prefix `!ai `.');
+    await message.reply('Halo! Ketik pertanyaanmu setelah mention atau prefix `!ai `.\nContoh: `!ai Apa itu AI?`');
     return;
   }
 
-  // Enqueue per channel to avoid overload
   enqueue(message.channelId, async () => {
+    // Kirim typing indicator
     const typingInterval = setInterval(() => message.channel.sendTyping(), 5000);
     message.channel.sendTyping();
 
     try {
       const history = getHistory(message.channelId);
 
-      // Append user message
-      history.push({ role: 'user', content: userPrompt });
-      trimHistory(history);
+      // Buat Gemini chat session dengan history
+      const model = genAI.getGenerativeModel({
+        model: MODEL_NAME,
+        systemInstruction: SYSTEM_INSTRUCTION,
+      });
 
-      const response = await ollama.chat({
-        model: MODEL,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'Kamu adalah asisten AI yang membantu, ramah, dan menjawab dalam bahasa yang sama dengan pengguna. ' +
-              'Jawab dengan ringkas dan jelas.',
-          },
-          ...history,
-        ],
-        options: {
-          keep_alive: KEEP_ALIVE,
-          num_ctx:    NUM_CTX,
-          num_predict: NUM_PREDICT,
+      const chat = model.startChat({
+        history: history,
+        generationConfig: {
+          maxOutputTokens: 800,
+          temperature: 0.7,
         },
       });
 
-      const reply = response.message.content.trim();
+      // Kirim pesan ke Gemini
+      const result = await chat.sendMessage(userPrompt);
+      const reply  = result.response.text().trim();
 
-      // Append assistant reply to history
-      history.push({ role: 'assistant', content: reply });
+      // Simpan ke history
+      history.push({ role: 'user',  parts: [{ text: userPrompt }] });
+      history.push({ role: 'model', parts: [{ text: reply }] });
       trimHistory(history);
 
-      // Truncate if needed
+      // Potong jika terlalu panjang
       const output = reply.length > MAX_CHARS
-        ? reply.slice(0, MAX_CHARS) + '\n*(balasan dipotong karena terlalu panjang)*'
+        ? reply.slice(0, MAX_CHARS) + '\n*(balasan dipotong)*'
         : reply;
 
       await message.reply(output);
+
     } catch (err) {
-      console.error('[ollama] Error:', err);
-      await message.reply('⚠️ Terjadi error saat menghubungi Ollama. Coba lagi sebentar.');
+      console.error('[gemini] Error:', err.message);
+
+      // Handle rate limit khusus
+      if (err.message?.includes('429') || err.message?.includes('quota')) {
+        await message.reply('⏳ Sedang ramai, coba lagi dalam beberapa detik ya!');
+      } else {
+        await message.reply('⚠️ Terjadi error. Coba lagi sebentar.');
+      }
     } finally {
       clearInterval(typingInterval);
     }
   });
 });
 
-// ─── Start ────────────────────────────────────────────────────────────────────
-if (!DISCORD_TOKEN) {
-  console.error('[error] DISCORD_TOKEN environment variable is not set!');
-  process.exit(1);
-}
-
+// ─── Login Discord ────────────────────────────────────────────────────────────
 client.login(DISCORD_TOKEN).catch((err) => {
-  console.error('[discord] Login failed:', err);
+  console.error('[discord] Login gagal:', err.message);
   process.exit(1);
 });

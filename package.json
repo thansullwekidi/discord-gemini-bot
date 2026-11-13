@@ -1,14 +1,14 @@
 {
-  "name": "discord-ollama-ai-bot",
-  "version": "1.0.0",
-  "description": "Discord AI bot powered by Ollama (qwen2.5:3b) deployed on Hugging Face Spaces",
+  "name": "discord-gemini-ai-bot",
+  "version": "2.0.0",
+  "description": "Discord AI bot powered by Google Gemini API, deployed free on Render.com",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "discord.js": "^14.16.3",
-    "ollama": "^0.5.9"
+    "@google/generative-ai": "^0.21.0"
   },
   "engines": {
     "node": ">=20"

@@ -1,56 +1,86 @@
 ---
-title: Discord Ollama AI Bot
+title: Discord Gemini AI Bot
 emoji: 🤖
 colorFrom: blue
-colorTo: indigo
+colorTo: purple
 sdk: docker
-app_port: 7860
+app_port: 3000
 pinned: false
 ---
 
-# Discord Ollama AI Bot 🤖
+# Discord Gemini AI Bot 🤖
 
-Bot Discord bertenaga AI lokal menggunakan [Ollama](https://ollama.com) dengan model `qwen2.5:3b`, di-deploy 24/7 secara gratis di **Hugging Face Spaces** via Docker.
+Bot Discord bertenaga **Google Gemini 2.0 Flash** (gratis), di-host di **Render.com** (gratis) — online 24/7 tanpa kartu kredit.
 
-## Fitur
-- Merespons mention (`@BotName`) atau prefix `!ai `
-- Menyimpan riwayat percakapan per channel (6 pesan terakhir)
-- Antrean pesan per channel agar CPU tidak overload
-- Healthcheck endpoint di port `7860` (wajib untuk HF Spaces)
+## Arsitektur
 
-## Cara Deploy
+```
+Discord ←→ Bot (Render.com) ←→ Gemini 2.0 Flash API (Google AI Studio)
+                ↑
+      UptimeRobot ping /10 menit (anti-sleep)
+```
 
-### 1. Fork / Clone Space ini
-Tekan tombol **Duplicate this Space** di Hugging Face.
+## Cara Deploy ke Render.com
 
-### 2. Tambahkan Secret `DISCORD_TOKEN`
-1. Buka halaman Space Anda → **Settings** → **Variables and secrets**
-2. Klik **New secret**
-3. Isi:
-   - **Name**: `DISCORD_TOKEN`
-   - **Value**: Token bot Discord Anda (dari [Discord Developer Portal](https://discord.com/developers/applications))
-4. Klik **Save**
+### 1. Siapkan API Keys
 
-### 3. Aktifkan Privileged Intents
-Di Discord Developer Portal → Bot Anda → **Privileged Gateway Intents**:
-- ✅ **Message Content Intent** — wajib diaktifkan
+**Discord Bot Token:**
+1. Buka [discord.com/developers/applications](https://discord.com/developers/applications)
+2. New Application → Bot → Reset Token → salin token
+3. Aktifkan **Message Content Intent** di menu Bot
 
-### 4. Invite Bot ke Server
-Gunakan OAuth2 URL Generator dengan scopes: `bot` + permissions: `Send Messages`, `Read Message History`.
+**Gemini API Key (gratis, tanpa VCC):**
+1. Buka [aistudio.google.com](https://aistudio.google.com)
+2. Klik **Get API key** → Create API key
+3. Salin key-nya (format: `AIza...`)
 
-### 5. Build Otomatis
-Setelah secret tersimpan, Space akan otomatis rebuild dan bot akan online dalam ~5–10 menit (proses pull model `qwen2.5:3b` ±2 GB).
+### 2. Push ke GitHub
+
+```bash
+git init
+git add .
+git commit -m "deploy discord gemini bot"
+git branch -M main
+git remote add origin https://github.com/USERNAME/REPO_NAME.git
+git push -u origin main
+```
+
+### 3. Deploy ke Render.com
+
+1. Buka [dashboard.render.com](https://dashboard.render.com) → **New → Web Service**
+2. Connect GitHub repo ini
+3. Render otomatis deteksi `render.yaml`
+4. Tambahkan **Environment Variables**:
+   - `DISCORD_TOKEN` = token bot Discord
+   - `GEMINI_API_KEY` = API key dari Google AI Studio
+5. Klik **Create Web Service**
+
+### 4. Anti-Sleep (Wajib!)
+
+Render free tier sleep setelah 15 menit tanpa request. Daftarkan URL bot ke:
+- **[UptimeRobot.com](https://uptimerobot.com)** → New Monitor → HTTP → ping setiap **5 menit**
+- URL: `https://nama-bot.onrender.com`
 
 ## Penggunaan
+
 ```
 !ai Apa itu machine learning?
-@BotName Jelaskan fotosintesis secara singkat
+@NamaBot Jelaskan fotosintesis singkat
 ```
 
+## Environment Variables
+
+| Variable | Deskripsi |
+|----------|-----------|
+| `DISCORD_TOKEN` | Token bot Discord |
+| `GEMINI_API_KEY` | API key Google AI Studio |
+| `PORT` | Port server (otomatis dari Render) |
+
 ## Spesifikasi
+
 | Item | Detail |
 |------|--------|
-| Model | `qwen2.5:3b` |
-| Runtime | Ollama + Node.js 20 |
-| Hardware | 2 vCPU, 16 GB RAM (HF Spaces Free) |
-| Port | 7860 |
+| Model | Gemini 2.0 Flash |
+| Limit gratis | 1.500 req/hari, 1 juta token/menit |
+| Host | Render.com Free |
+| Biaya | **Rp 0** |
