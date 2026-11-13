@@ -5,7 +5,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 // ─── Config ───────────────────────────────────────────────────────────────────
 const DISCORD_TOKEN  = process.env.DISCORD_TOKEN  ? process.env.DISCORD_TOKEN.trim()  : null;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : null;
-const MODEL_NAME     = 'gemini-2.0-flash-lite'; // Model Google stabil, gratis, kuota besar
+const MODEL_NAME     = 'gemini-3.5-flash-lite'; // Rekomendasi resmi Google per Nov 2026
 const PREFIX         = '!ai ';
 const MAX_CHARS      = 1990;
 const PORT           = process.env.PORT || 3000;
